@@ -1,0 +1,15 @@
+{
+  "name": "wordpress-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@demo/events": "file:../../packages/events",
+    "@demo/rabbitmq": "file:../../packages/rabbitmq",
+    "axios": "^1.7.2",
+    "express": "^4.19.2"
+  }
+}

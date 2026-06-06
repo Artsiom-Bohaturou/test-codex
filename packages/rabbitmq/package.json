@@ -1,0 +1,8 @@
+{
+  "name": "@demo/rabbitmq",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "amqplib": "^0.10.4"
+  }
+}
