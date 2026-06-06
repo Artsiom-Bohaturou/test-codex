@@ -1,0 +1,135 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: cms-demo-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: app
+      RABBITMQ_DEFAULT_PASS: app
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  main-dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install --workspaces=false && (npm run worker &) && npm run dev"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/main-dashboard:/app
+      - ./packages:/packages
+      - main-dashboard-data:/data
+    environment:
+      PORT: 3000
+      RABBITMQ_URL: amqp://app:app@rabbitmq:5672
+      RABBITMQ_EXCHANGE: cms.events
+      DATABASE_URI: file:/data/main-dashboard.db
+      PAYLOAD_SECRET: main-dashboard-local-secret
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  client-payload-blog:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install --workspaces=false && (npm run worker &) && npm run dev"
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./apps/client-payload-blog:/app
+      - ./packages:/packages
+      - client-payload-blog-data:/data
+    environment:
+      PORT: 3001
+      RABBITMQ_URL: amqp://app:app@rabbitmq:5672
+      RABBITMQ_EXCHANGE: cms.events
+      DATABASE_URI: file:/data/client-payload-blog.db
+      PAYLOAD_SECRET: client-payload-blog-local-secret
+      NEXT_PUBLIC_SITE_URL: http://localhost:3001
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  wordpress-db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: wordpress-root
+    volumes:
+      - wordpress-db-data:/var/lib/mysql
+
+  wordpress:
+    image: wordpress:6.5-apache
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      CMS_DEMO_BRIDGE_SECRET: local-demo-secret
+    depends_on:
+      - wordpress-db
+    volumes:
+      - wordpress-data:/var/www/html
+      - ./apps/wordpress-plugin/cms-demo-local-publisher:/var/www/html/wp-content/plugins/cms-demo-local-publisher
+
+  wordpress-cli:
+    image: wordpress:cli-php8.2
+    user: "33:33"
+    command: >
+      sh -c "
+      until wp db check; do sleep 3; done;
+      wp core install --url=http://localhost:8080 --title='CMS Demo WordPress' --admin_user=admin --admin_password=admin --admin_email=admin@example.com --skip-email || true;
+      wp plugin activate cms-demo-local-publisher || true;
+      "
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    depends_on:
+      - wordpress-db
+      - wordpress
+    volumes:
+      - wordpress-data:/var/www/html
+      - ./apps/wordpress-plugin/cms-demo-local-publisher:/var/www/html/wp-content/plugins/cms-demo-local-publisher
+
+  wordpress-bridge:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install --workspaces=false && npm start"
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./apps/wordpress-bridge:/app
+      - ./packages:/packages
+    environment:
+      PORT: 3002
+      RABBITMQ_URL: amqp://app:app@rabbitmq:5672
+      RABBITMQ_EXCHANGE: cms.events
+      WORDPRESS_API_URL: http://wordpress:80/wp-json/wp/v2/posts
+      WORDPRESS_CREATE_POST_URL: http://wordpress:80/wp-json/cms-demo/v1/posts
+      WORDPRESS_BRIDGE_SECRET: local-demo-secret
+      POLL_INTERVAL_MS: 10000
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      wordpress:
+        condition: service_started
+      wordpress-cli:
+        condition: service_completed_successfully
+
+volumes:
+  main-dashboard-data:
+  client-payload-blog-data:
+  wordpress-db-data:
+  wordpress-data:
